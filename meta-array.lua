@@ -7,7 +7,7 @@ array = {}
 ---@param n integer
 ---@return array
 function array.new(n)
-    inst = {}
+    local inst = {}
     inst.values = {}
     inst.length_ = n -- In C we don't have collision, but in Lua we do.
     return inst

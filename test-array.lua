@@ -6,6 +6,7 @@ end
 require "array"
 
 a = array.new(10)
+print(a)
 print("a:length()", a:length()) --> 10
 
 --- METHOD FUNCTIONS ------------------------------------------------------- {{{

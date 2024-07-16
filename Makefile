@@ -12,10 +12,13 @@ LUA_LIBS := array
 # /std:c11	Adhere to the 2011 C Standard.
 # /W3		Enable many warnings.
 # /WX		Treat all warning as errors.
+# /O1		Maximum optimizations, favoring space.
 # /O2		Maximum optimizations, favoring speed.
+# /Os		Optimize but favoring code space.
+# /Od		Disable all optimizations.
 # -I"..."	Add an include directory to look at.
 CC 	  	 := cl
-CC_FLAGS := -nologo -EHsc -std:c11 -W3 -WX -O2 -I"$(LUA_DIR)"
+CC_FLAGS := -nologo -EHsc -std:c11 -W3 -Od -I"$(LUA_DIR)"
 
 .PHONY: all
 all: $(LUA_LIBS:=.dll)
