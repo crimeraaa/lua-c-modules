@@ -1,8 +1,4 @@
-if not package.cpath:find("%.\\%?%.dll") then
-    package.cpath = package.cpath .. ";.\\?.dll"
-end
-
--- Note that we cannot name this file `test-array.lua`!
+-- Note that we cannot name this file `dyarray.lua`!
 require "dyarray"
 
 a = dyarray.new({0, 0, 0, 0, 0, 0, 0, 0, 0, 0})

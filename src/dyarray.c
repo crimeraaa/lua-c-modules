@@ -104,6 +104,12 @@ static int dump_table(lua_State *L)
     return 0;
 }
 
+static int bad_index(lua_State *L, int i)
+{
+    const char *tname = luaL_typename(L, -1);
+    return luaL_error(L, "non-number at index %d (a %s value)", i, tname);
+}
+
 // From: [ t ]
 // To:   [ self ]
 //
@@ -132,7 +138,7 @@ static int new_dyarray(lua_State *L)
         if (lua_isnumber(L, -1))
             self->values[i - 1] = lua_tonumber(L, -1);
         else
-            return luaL_error(L, "non-number at index %d (a %s value)", i, luaL_typename(L, -1));
+            return bad_index(L, i);
         lua_pop(L, 1); // [ t, self ]
     }
     return 1;
@@ -159,7 +165,7 @@ static int resolve_index(DyArray *self, int i)
 static int check_index(lua_State *L, DyArray *self, int argn)
 {
     int i = resolve_index(self, luaL_checkint(L, argn));
-    luaL_argcheck(L, 1 <= i && i <= self->length, 2, "index out of range");
+    luaL_argcheck(L, 1 <= i && i <= self->length, argn, "index out of range");
     return i;
 }
 
@@ -177,6 +183,11 @@ static int get_dyarray(lua_State *L)
     return 1;
 }
 
+static int bad_field(lua_State *L, const char *s)
+{
+    return luaL_error(L, "Bad " LIB_NAME_Q " field " LUA_QS, s);
+}
+
 // From: [ self, key ]
 // To:   [ array[key] ]
 static int get_field(lua_State *L)
@@ -184,9 +195,7 @@ static int get_field(lua_State *L)
     const char *s = luaL_checkstring(L, 2);
     lua_getglobal(L, LIB_NAME); // [ self, key, mt ]
     lua_getfield(L, -1, s);     // [ self, key, mt, mt[key] ]
-    if (lua_isnil(L, -1))
-        return luaL_error(L, "Bad " LIB_NAME_Q " field " LUA_QS, lua_tostring(L, -1));
-    return 1;
+    return lua_isnil(L, -1) ? bad_field(L, s) : 1;
 }
 
 // From:   [ self, index, value ]
@@ -199,19 +208,24 @@ static int set_dyarray(lua_State *L)
     return 1;
 }
 
+// If we grow, only copy up to `len` elements.
+// Otherwise, if we shrink, only copy up to `idx` elements.
+static int copy_up_to(int idx, int len)
+{
+    return (idx >= len) ? len : idx;
+}
+
 // From:    [ self, ...args ]
 // To:      [ self ]
 static int resize_internal(lua_State *L, DyArray *self, int idx, int cap)
 {
     // [ self, ...args, ud ]
     lua_Number *tmp = lua_newuserdata(L, size_of_dyarray(self, cap));
-    // Copy old elements to new allocated memory.
-    for (int i = 1; i <= self->length; i++)
-        tmp[i - 1] = self->values[i - 1];
+    memset(tmp, 0, lua_objlen(L, -1));
 
-    // If we grew, zero out the uncopied elements.
-    for (int i = self->length + 1; i <= idx; i++)
-        tmp[i - 1] = 0;
+    // Copy old elements to new allocated memory.
+    for (int i = 1, end = copy_up_to(idx, self->length); i <= end; i++)
+        tmp[i - 1] = self->values[i - 1];
 
     self->values   = tmp;
     self->length   = idx;
@@ -252,9 +266,9 @@ static int insert_internal(lua_State *L, DyArray *self, int idx, lua_Number n)
     return 1;
 }
 
-// From:    [ self, index, value ]
+// From:    [ self, i, v ]
 // To:      [ self ]
-// Side:    index > self.length ? resize(self); self.values[index] = value
+// Side:    i > self.length ? resize(self, i); self.values[i] = v
 static int insert_dyarray(lua_State *L)
 {
     DyArray   *self = check_dyarray(L, 1);
@@ -263,9 +277,9 @@ static int insert_dyarray(lua_State *L)
     return insert_internal(L, self, idx, n);
 }
 
-// From:    [ self, value ]
+// From:    [ self, v ]
 // To:      [ self ]
-// Side:    resize(self), self.values[self.length + 1] = value
+// Side:    resize(self, self.length + 1), self.values[self.length] = v
 static int push_dyarray(lua_State *L)
 {
     DyArray   *self = check_dyarray(L, 1); 
@@ -322,7 +336,7 @@ static int mt_index(lua_State *L)
     lua_getglobal(L, "tostring"); // [ self, key, tostring ]
     lua_pushvalue(L, 2);          // [ self, key, tostring, key ]
     lua_call(L, 1, 1);            // [ self, key, tostring(key) ]
-    return luaL_error(L, "Bad " LIB_NAME_Q " field " LUA_QS, lua_tostring(L, -1));
+    return bad_field(L, lua_tostring(L, -1));
 }
 
 static const luaL_reg lib_dyarray[] = {
@@ -349,9 +363,9 @@ LUALIB_API int luaopen_dyarray(lua_State *L)
     // https://www.lua.org/manual/5.1/manual.html#luaL_newmetatable
     // https://www.lua.org/manual/5.1/manual.html#luaL_register
     // Unique metatable identifier that hopefully does not clash.
-    luaL_newmetatable(L, MT_NAME);         // [ mt ]
+    luaL_newmetatable(L, MT_NAME);           // [ mt ]
     luaL_register(L, NULL, mt_dyarray);      // [ mt ], reg. mt_dyarray to mt (top)
-    luaL_register(L, LIB_NAME, lib_dyarray); // [ mt, array ], reg. lib_dyarray to _G.array
+    luaL_register(L, LIB_NAME, lib_dyarray); // [ mt, dyarray ], reg. lib_dyarray to _G.dyarray
     
     lua_pushcfunction(L, &dump_table);
     lua_setglobal(L, "dump_table");
