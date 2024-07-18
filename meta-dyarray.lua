@@ -31,19 +31,24 @@ function dyarray:set(i, v)
 end
 
 -- Mostly C code, not much Lua-equivalent representation!
----@param sz integer
-function dyarray:resize(sz)
-    self.m_capacity = sz
+---@param len integer
+function dyarray:resize(len)
+    self.m_capacity = len
+    -- If we extended, zero out the extended region.
+    for i = self.m_length + 1, len, 1 do
+        self.m_values[i] = 0
+    end
     return self
 end
 
 ---@param i integer
 ---@param v number
 function dyarray:insert(i, v)
-    self.m_values[i] = v
+    -- Need to extend the buffer?
     if i > self.m_length then
-        self.m_length = i
+        self:resize(i)
     end
+    self.m_values[i] = v
     return self
 end
 

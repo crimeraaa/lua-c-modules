@@ -1,15 +1,13 @@
 -- Note that we cannot name this file `dyarray.lua`!
 require "dyarray"
 
-a = dyarray.new({10, 20, 30, 40})
+a = dyarray.new({0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 print("\nCONSTRUCTION")
-print("dyarray.new{10, 20, 30, 40} =", a)
-print("a:push(50) =", a:push(50))
-print("a:insert(8, 80) =", a:insert(8, 80))
-print("a:resize(4) =", a:resize(4))
-
-print(a)
-print("a:length()", a:length()) --> 10
+print("a               ", a)
+print("a:push(50)      ", a:push(50))
+print("a:insert(8, 80) ", a:insert(8, 80))
+print("a:resize(16)    ", a:resize(16))
+print("a:length()      ", a:length()) --> 16
 
 --- METHOD FUNCTIONS ------------------------------------------------------- {{{
 
@@ -21,7 +19,7 @@ local function mess_up_get(a)
     print(a:get(100000))
 end
 
-print("a:get(100000)", pcall(mess_up_get, a)) --> (index out of range)
+print("a:get(100000)      ", pcall(mess_up_get, a)) --> (index out of range)
 
 --- }}} ------------------------------------------------------------------------
 
@@ -44,10 +42,10 @@ print("a[1000000]", pcall(mess_up_index, a)) --> (index out of range)
 
 print("\nPUSH AND INSERT")
 local b = dyarray.new{10, 20, 30, 40}
-print("b", b)                               --> {10, 20, 30, 40}
-print("b:push(50)", b:push(50))             --> {10, 20, 30, 40, 50}
-print("b:insert(8, 80)", b:insert(8, 80))   --> {10, 20, 30, 40, 50, 0, 0, 80}
+print("b               ", b)                --> {10, 20, 30, 40}
+print("b:push(50)      ", b:push(50))       --> {10, 20, 30, 40, 50}
+print("b:insert(8, 80) ", b:insert(8, 80))  --> {10, 20, 30, 40, 50, 0, 0, 80}
 print("b:insert(-2, 70)", b:insert(-2, 70)) --> {10, 20, 30, 40, 50, 0, 70, 80}
-print("b:resize(4)", b:resize(4))
+print("b:resize(4)     ", b:resize(4))
 
 --- }}} ------------------------------------------------------------------------

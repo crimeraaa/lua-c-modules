@@ -56,7 +56,7 @@ $(DIR_ALL):
 
 # /LD			Create a DLL and its associated files.
 # /link ...		Pass the remaining arguments to LINK.EXE.
-$(DIR_BIN)/%.dll: $(DIR_SRC)/%.c | $(DIR_BIN) $(DIR_OBJ)
+$(DIR_BIN)/%.dll: $(DIR_SRC)/%.c $(DIR_SRC)/common.h | $(DIR_BIN) $(DIR_OBJ)
 	$(CC) $(CC_FLAGS) -LD $< -link "$(LUA_DIR)/lua5.1.lib"
 
 .PHONY: clean

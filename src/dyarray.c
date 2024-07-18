@@ -117,6 +117,15 @@ static int bad_index(lua_State *L, int i)
     return luaL_error(L, "non-number at index %d (a %s value)", i, tname);
 }
 
+// TODO: Check for integer overflow
+static int next_power_of_2(int x)
+{
+    int n = 8;
+    while (n <= x)
+        n *= 2;
+    return n;
+}
+
 // From: [ t ]
 // To:   [ self ]
 //
@@ -124,20 +133,17 @@ static int bad_index(lua_State *L, int i)
 static int new_dyarray(lua_State *L)
 {
     DyArray *self;
-    int      len;
 
     luaL_checktype(L, 1, LUA_TTABLE);
-    self = lua_newuserdata(L, sizeof(*self)); // [ t, self ]
-    len  = cast_int(lua_objlen(L, 1));
-
-    self->values   = new_pointer(L, size_of_values(self, len));
-    self->capacity = len;
-    self->length   = len;
+    self           = lua_newuserdata(L, sizeof(*self)); // [ t, self ]
+    self->length   = cast_int(lua_objlen(L, 1));
+    self->capacity = next_power_of_2(self->length);
+    self->values   = new_pointer(L, size_of_values(self, self->capacity));
 
     luaL_getmetatable(L, LIB_MTNAME); // [ t, self, mt ]
-    lua_setmetatable(L, -2);          // [ t, self ] ; setmetatable(a, mt)
+    lua_setmetatable(L, -2);          // [ t, self ] ; setmetatable(self, mt)
 
-    for (int i = 1; i <= len; i++) {
+    for (int i = 1; i <= self->length; i++) {
         lua_rawgeti(L, 1, i); // [ t, self, t[i] ]
         if (lua_isnumber(L, -1))
             self->values[i - 1] = lua_tonumber(L, -1);
@@ -145,6 +151,9 @@ static int new_dyarray(lua_State *L)
             return bad_index(L, i); // Will call __gc if applicable.
         lua_pop(L, 1); // [ t, self ]
     }
+    // Zero out uninitialized region.
+    for (int i = self->length + 1; i <= self->capacity; i++)
+        self->values[i - 1] = 0;
     return 1; // self already on top of stack
 }
 
@@ -218,10 +227,9 @@ static int set_dyarray(lua_State *L)
 // To:      [ self ]
 static int resize_internal(lua_State *L, DyArray *self, int nlen, int ncap)
 {
-    size_t      osz = size_of_values(self, self->capacity);
-    size_t      nsz = size_of_values(self, ncap);
+    size_t      osz = size_of_values(self, self->capacity); // old size.
+    size_t      nsz = size_of_values(self, ncap);           // new size.
     lua_Number *tmp = resize_pointer(L, self->values, osz, nsz);
-
     debug_printfln("resizing DyArray::values from %d to %d", self->capacity, ncap);
 
     // If we extended, zero out the new region.
@@ -253,15 +261,13 @@ static int resize_dyarray(lua_State *L)
 static int insert_internal(lua_State *L, DyArray *self, int idx, lua_Number n)
 {
     // Need to grow?
-    if (idx > self->capacity) {
-        int cap = 8;
-        while (cap <= idx)
-            cap *= 2;
-        resize_internal(L, self, idx, cap);
-    }
+    if (idx > self->capacity)
+        resize_internal(L, self, idx, next_power_of_2(idx));
+
     self->values[idx - 1] = n;
     if (idx > self->length)
         self->length = idx;
+
     lua_pushvalue(L, 1);
     return 1;
 }

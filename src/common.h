@@ -39,7 +39,6 @@ static inline void *resize_pointer(lua_State *L, void *hint, size_t osz, size_t 
     // Non-zero allocation request failed?
     if (nsz != 0 && ptr == NULL)
         luaL_error(L, LIB_MEMERR);
-
     return ptr;
 }
 
