@@ -5,9 +5,11 @@
 #error Please define LIB_NAME as the desired library name before including.
 #endif
 
-#define LIB_NAME_Q  LUA_QL(LIB_NAME)
-#define LIB_MTNAME  ("C_From_Lua" LIB_NAME)
-#define LIB_MEMERR  "Out of memory (module " LIB_NAME_Q ")"
+#define X__STRINGIFY(x) #x
+#define STRINGIFY(x)    X__STRINGIFY(x)
+#define LIB_NAME_Q      LUA_QL(LIB_NAME)
+#define LIB_MTNAME      "C_Modules" LIB_NAME
+#define LIB_MEMERR      "Out of memory (module " LIB_NAME_Q ")"
 
 #ifdef _WIN32
 

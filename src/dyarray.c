@@ -225,7 +225,7 @@ static int set_dyarray(lua_State *L)
 //
 // From:    [ self, ...args ]
 // To:      [ self ]
-static int resize_internal(lua_State *L, DyArray *self, int nlen, int ncap)
+static int c_resize_dyarray(lua_State *L, DyArray *self, int nlen, int ncap)
 {
     size_t      osz = size_of_values(self, self->capacity); // old size.
     size_t      nsz = size_of_values(self, ncap);           // new size.
@@ -253,16 +253,16 @@ static int resize_dyarray(lua_State *L)
     if (nlen <= 0)
         return luaL_error(L, "Cannot resize " LIB_NAME_Q " to %d items", nlen);
     else
-        return resize_internal(L, self, nlen, nlen);
+        return c_resize_dyarray(L, self, nlen, nlen);
 }
 
 // From: [ self, ...args ]
 // To:   [ self ]
-static int insert_internal(lua_State *L, DyArray *self, int idx, lua_Number n)
+static int c_insert_dyarray(lua_State *L, DyArray *self, int idx, lua_Number n)
 {
     // Need to grow?
     if (idx > self->capacity)
-        resize_internal(L, self, idx, next_power_of_2(idx));
+        c_resize_dyarray(L, self, idx, next_power_of_2(idx));
 
     self->values[idx - 1] = n;
     if (idx > self->length)
@@ -280,7 +280,7 @@ static int insert_dyarray(lua_State *L)
     DyArray   *self = check_dyarray(L, 1);
     int        idx  = resolve_index(self, luaL_checkint(L, 2));
     lua_Number n    = luaL_checknumber(L, 3);
-    return insert_internal(L, self, idx, n);
+    return c_insert_dyarray(L, self, idx, n);
 }
 
 // From:    [ self, v ]
@@ -290,7 +290,7 @@ static int push_dyarray(lua_State *L)
 {
     DyArray   *self = check_dyarray(L, 1);
     lua_Number n    = luaL_checknumber(L, 2);
-    return insert_internal(L, self, self->length + 1, n);
+    return c_insert_dyarray(L, self, self->length + 1, n);
 }
 
 // From: [ self ]
