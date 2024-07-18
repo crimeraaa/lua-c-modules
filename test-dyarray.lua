@@ -1,13 +1,19 @@
 -- Note that we cannot name this file `dyarray.lua`!
 require "dyarray"
 
-a = dyarray.new({0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+a = dyarray.new({10, 20, 30, 40})
+print("\nCONSTRUCTION")
+print("dyarray.new{10, 20, 30, 40} =", a)
+print("a:push(50) =", a:push(50))
+print("a:insert(8, 80) =", a:insert(8, 80))
+print("a:resize(4) =", a:resize(4))
+
 print(a)
 print("a:length()", a:length()) --> 10
 
 --- METHOD FUNCTIONS ------------------------------------------------------- {{{
 
-print("METHOD FUNCTIONS")
+print("\nMETHOD FUNCTIONS")
 print("a:set(1, 13):get(1)", a:set(1, 13):get(1)) --> 13
 
 ---@param a dyarray
@@ -21,7 +27,7 @@ print("a:get(100000)", pcall(mess_up_get, a)) --> (index out of range)
 
 --- METAMETHODS ------------------------------------------------------------ {{{
 
-print("METAMETHODS")
+print("\nMETAMETHODS")
 a[2] = 26
 print("a[2]", a[2]) --> 26
 
@@ -36,7 +42,7 @@ print("a[1000000]", pcall(mess_up_index, a)) --> (index out of range)
 
 --- PUSH AND INSERT -------------------------------------------------------- {{{
 
-print("PUSH AND INSERT")
+print("\nPUSH AND INSERT")
 local b = dyarray.new{10, 20, 30, 40}
 print("b", b)                               --> {10, 20, 30, 40}
 print("b:push(50)", b:push(50))             --> {10, 20, 30, 40, 50}

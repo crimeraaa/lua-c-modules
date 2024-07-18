@@ -1,41 +1,29 @@
 /**
  * @name    User-Defined Types in C
  * @link    https://www.lua.org/pil/28.html
- * 
+ *
  * @note    Recall that in Lua, each and every function has it's own "stack frame"
  *          or window into the primary stack. Think of it like a read-write view
  *          or slice into the VM stack.
- * 
+ *
  *          [0] is usually the function object itself.
  *          [1] is usually the first argument, if applicable.
  *          So on and so forth.
- *          
+ *
  * @note    In the Lua 5.1 manual, the right-hand-side notation [-o, +p, x] is:
- *          
+ *
  *          -o:     Number of values popped by the function.
  *          +p:     Number of values pushed by the function.
  *          x:      Type of error, if any, thrown by the function.
- * 
+ *
  *          Note that at least for Lua 5.1, function arguments are popped before
  *          the return values.
  *
  * @see     https://www.lua.org/manual/5.1/manual.html#3.7
  */
-#define LUA_BUILD_AS_DLL
-#define LUA_LIB
+#define LIB_NAME "dyarray"
+#include "common.h"
 #include <string.h>
-#include <lua.h>
-#include <lauxlib.h>
-
-#define LIB_NAME   "dyarray"
-#define LIB_NAME_Q LUA_QL(LIB_NAME)
-#define MT_NAME    ("LuaBook." LIB_NAME)
-
-#ifndef __cplusplus
-#define cast(T, expr)   ((T)(expr))
-#else  // __cplusplus defined.
-#define cast(T, expr)   static_cast<T>(expr)
-#endif // __cplusplus
 
 typedef struct {
     int         length;   // Number of contiguous active elements.
@@ -43,46 +31,65 @@ typedef struct {
     lua_Number *values;   // Heap-allocated 1D array.
 } DyArray;
 
-#define size_of_dyarray(self, n)  ((n) * sizeof((self)->values[0]))
+#define size_of_values(self, n)  size_of_array((self)->values, n)
+
+#ifdef _DEBUG
+#define debug_printf(fmt, ...)      printf("[DEBUG]: " fmt, __VA_ARGS__)
+#define debug_printfln(fmt, ...)    debug_printf(fmt "\n", __VA_ARGS__)
+#define debug_println(s)            debug_printfln("%s", s)
+#else
+#define debug_printf(fmt, ...)
+#define debug_printfln(fmt, ...)
+#define debug_println(s)
+#endif
+
+static void print_value(lua_State *L, int i)
+{
+    switch (lua_type(L, i)) {
+    case LUA_TNIL:
+        printf("nil");
+        break;
+    case LUA_TBOOLEAN:
+        printf(lua_toboolean(L, i) ? "true" : "false");
+        break;
+    case LUA_TNUMBER:
+        printf("%g", lua_tonumber(L, i));
+        break;
+    case LUA_TSTRING: {
+        const char *s = lua_tostring(L, i);
+        const char  q = (lua_objlen(L, i) == 1) ? '\'' : '\"';
+        printf("%c%s%c", q, s, q);
+        break;
+    }
+    default:
+        printf("%s(%p)", luaL_typename(L, i), lua_topointer(L, i));
+        break;
+    }
+}
 
 // Adapted from: https://www.lua.org/pil/24.2.3.html
 static int dump_stack(lua_State *L)
 {
     for (int i = 1, top = lua_gettop(L); i <= top; i++) {
-        printf("[%i] ", i);
-        switch (lua_type(L, i)) {
-        case LUA_TNIL:
-            printf("nil");
-            break;
-        case LUA_TBOOLEAN:
-            printf(lua_toboolean(L, i) ? "true" : "false");
-            break;
-        case LUA_TNUMBER:
-            printf("%g", lua_tonumber(L, i));
-            break;
-        case LUA_TSTRING:
-            printf("'%s'", lua_tostring(L, i));
-            break;
-        default:
-            printf("%s (%p)", luaL_typename(L, i), lua_topointer(L, i));
-            break;
-        }
+        printf("[%d] ", i);
+        print_value(L, i);
         printf("\n");
     }
     printf("\n");
     return 0;
 }
 
-static const char *to_string(lua_State *L, int fn, int arg)
-{
-    const char *s;
-    lua_pushvalue(L, fn);  // [ tostring]
-    lua_pushvalue(L, arg); // [ tostring, arg ]
-    lua_call(L, 1, 1);     // [ tostring(arg) ]
-    s = lua_tostring(L, -1);
-    lua_pop(L, 1); // []
-    return s;
-}
+// Assumes `_G.tostring` is found at the valid index `fn`.
+// static const char *to_string(lua_State *L, int fn, int arg)
+// {
+//     const char *s;
+//     lua_pushvalue(L, fn);  // [ tostring]
+//     lua_pushvalue(L, arg); // [ tostring, arg ]
+//     lua_call(L, 1, 1);     // [ tostring(arg) ]
+//     s = lua_tostring(L, -1);
+//     lua_pop(L, 1); // []
+//     return s;
+// }
 
 // From:    [ t ]
 // To:      []
@@ -90,16 +97,16 @@ static int dump_table(lua_State *L)
 {
     if (!lua_istable(L, 1))
         return luaL_typerror(L, 1, lua_typename(L, LUA_TTABLE));
-    
-    lua_getglobal(L, "tostring"); // [ t, tostring ]
-    lua_pushnil(L);               // [ t, tostring, nil ] ; Set space for key.
+
+    lua_pushnil(L); // [ t, nil ] ; Set space for key.
 
     // https://www.lua.org/manual/5.1/manual.html#lua_next
     while (lua_next(L, 1)) {
-        // Push copies so we don't confuse `lua_next()`.
-        // [ t, tostring, k, t[k] ]
-        printf("K: %s - V: %s\n", to_string(L, 2, 3), to_string(L, 2, 4));
-        lua_pop(L, 1); // [ t, tostring, k ]
+        // [ t, k, t[k] ]
+        printf("[");    print_value(L, 2);
+        printf("] = "); print_value(L, 3);
+        printf("\n");
+        lua_pop(L, 1); // [ t, k ]
     }
     return 0;
 }
@@ -116,45 +123,42 @@ static int bad_index(lua_State *L, int i)
 // https://www.lua.org/pil/28.1.html
 static int new_dyarray(lua_State *L)
 {
-    DyArray *self = lua_newuserdata(L, sizeof(*self)); // [ t, self ]
-    int      len  = cast(int, lua_objlen(L, 1));
-    size_t   sz   = size_of_dyarray(self, len);
-    
+    DyArray *self;
+    int      len;
+
     luaL_checktype(L, 1, LUA_TTABLE);
-    
-    // Allocate an arbitrary block of memory that can only be manipulated within
-    // C but is memory managed by Lua.
-    self->values   = lua_newuserdata(L, sz); // [ t, self, self->values ]
+    self = lua_newuserdata(L, sizeof(*self)); // [ t, self ]
+    len  = cast_int(lua_objlen(L, 1));
+
+    self->values   = new_pointer(L, size_of_values(self, len));
     self->capacity = len;
     self->length   = len;
 
-    lua_pop(L, 1);                 // [ t, self ]
-    luaL_getmetatable(L, MT_NAME); // [ t, self, mt ]
-    lua_setmetatable(L, -2);       // [ t, self ] ; setmetatable(a, mt)
+    luaL_getmetatable(L, LIB_MTNAME); // [ t, self, mt ]
+    lua_setmetatable(L, -2);          // [ t, self ] ; setmetatable(a, mt)
 
     for (int i = 1; i <= len; i++) {
-        lua_pushinteger(L, i); // [ t, self, k ]
-        lua_gettable(L, 1);    // [ t, self, t[k] ]
+        lua_rawgeti(L, 1, i); // [ t, self, t[i] ]
         if (lua_isnumber(L, -1))
             self->values[i - 1] = lua_tonumber(L, -1);
         else
-            return bad_index(L, i);
+            return bad_index(L, i); // Will call __gc if applicable.
         lua_pop(L, 1); // [ t, self ]
     }
-    return 1;
+    return 1; // self already on top of stack
 }
 
 /**
  * @brief   May throw if metatable does not match.
  *          `luaL_checkudata()` checks the stack index against the given
  *          metatable name. This name may be found in the registry.
- *        
+ *
  * @note    As of Lua 5.1 `luaL_checkudata()` throws by itself.
  *          See: https://www.lua.org/manual/5.1/manual.html#7.3
  */
 static DyArray *check_dyarray(lua_State *L, int argn)
 {
-    return luaL_checkudata(L, argn, MT_NAME);
+    return luaL_checkudata(L, argn, LIB_MTNAME);
 }
 
 static int resolve_index(DyArray *self, int i)
@@ -200,7 +204,7 @@ static int get_field(lua_State *L)
 
 // From:   [ self, index, value ]
 // To:     [ self ]
-// Side:   self.values[index] = value
+// Does:   self.values[index] = value
 static int set_dyarray(lua_State *L)
 {
     *get_item(L) = luaL_checknumber(L, 3);
@@ -208,44 +212,40 @@ static int set_dyarray(lua_State *L)
     return 1;
 }
 
-// If we grow, only copy up to `len` elements.
-// Otherwise, if we shrink, only copy up to `idx` elements.
-static int copy_up_to(int idx, int len)
-{
-    return (idx >= len) ? len : idx;
-}
-
+// We assume that the allocator will free the old pointer upon resizing.
+//
 // From:    [ self, ...args ]
 // To:      [ self ]
-static int resize_internal(lua_State *L, DyArray *self, int idx, int cap)
+static int resize_internal(lua_State *L, DyArray *self, int nlen, int ncap)
 {
-    // [ self, ...args, ud ]
-    lua_Number *tmp = lua_newuserdata(L, size_of_dyarray(self, cap));
-    memset(tmp, 0, lua_objlen(L, -1));
+    size_t      osz = size_of_values(self, self->capacity);
+    size_t      nsz = size_of_values(self, ncap);
+    lua_Number *tmp = resize_pointer(L, self->values, osz, nsz);
 
-    // Copy old elements to new allocated memory.
-    for (int i = 1, end = copy_up_to(idx, self->length); i <= end; i++)
-        tmp[i - 1] = self->values[i - 1];
+    debug_printfln("resizing DyArray::values from %d to %d", self->capacity, ncap);
+
+    // If we extended, zero out the new region.
+    for (int i = self->length + 1; i <= ncap; i++)
+        tmp[i - 1] = 0;
 
     self->values   = tmp;
-    self->length   = idx;
-    self->capacity = cap;
-    lua_pop(L, 1);       // [ self, ...args ]
+    self->length   = nlen;
+    self->capacity = ncap;
     lua_pushvalue(L, 1); // [ self, ...args, self ]
     return 1;
 }
 
-// From:    [ self, newsz ]
+// From:    [ self, nlen ]
 // To:      []
-// Side:    resize(self, newsz)
+// Does:    resize(self, nlen)
 static int resize_dyarray(lua_State *L)
 {
     DyArray *self = check_dyarray(L, 1);
-    int      size = luaL_checkint(L, 2);
-    if (size <= 0)
-        return luaL_error(L, "Cannot resize " LIB_NAME_Q " to %d items", size);
+    int      nlen = luaL_checkint(L, 2);
+    if (nlen <= 0)
+        return luaL_error(L, "Cannot resize " LIB_NAME_Q " to %d items", nlen);
     else
-        return resize_internal(L, self, size, size);
+        return resize_internal(L, self, nlen, nlen);
 }
 
 // From: [ self, ...args ]
@@ -268,7 +268,7 @@ static int insert_internal(lua_State *L, DyArray *self, int idx, lua_Number n)
 
 // From:    [ self, i, v ]
 // To:      [ self ]
-// Side:    i > self.length ? resize(self, i); self.values[i] = v
+// Does:    i > self.length ? resize(self, i); self.values[i] = v
 static int insert_dyarray(lua_State *L)
 {
     DyArray   *self = check_dyarray(L, 1);
@@ -279,10 +279,10 @@ static int insert_dyarray(lua_State *L)
 
 // From:    [ self, v ]
 // To:      [ self ]
-// Side:    resize(self, self.length + 1), self.values[self.length] = v
+// Does:    resize(self, self.length + 1), self.values[self.length] = v
 static int push_dyarray(lua_State *L)
 {
-    DyArray   *self = check_dyarray(L, 1); 
+    DyArray   *self = check_dyarray(L, 1);
     lua_Number n    = luaL_checknumber(L, 2);
     return insert_internal(L, self, self->length + 1, n);
 }
@@ -299,17 +299,18 @@ static int length_dyarray(lua_State *L)
 // To:   [ tostring(self) ]
 static int mt_tostring(lua_State *L)
 {
-    // Lua implements their own format string functionality, %i is unsupported.
     DyArray *self = check_dyarray(L, 1);
     int      len  = self->length;
     int      used = len + 2;
-    
+
     // Can fit all array elements, plus formatters, onto the stack?
     luaL_checkstack(L, used + 1, "Not enough memory to convert array to string");
+
+    // In the Lua API format string functionality, %i is unsupported.
     lua_pushfstring(L, LIB_NAME "(length = %d, {", len); // [ self, '{' ]
     for (int i = 1; i <= len; i++) {
         lua_pushnumber(L, self->values[i - 1]); // [ self, '{', f]
-        
+
         // Not at last element?
         if (i < len) {
             lua_pushstring(L, ", "); // [ self, '{', f, ", " ]
@@ -317,9 +318,7 @@ static int mt_tostring(lua_State *L)
         }
     }
     lua_pushstring(L, "})"); // [ self, '{', tostring(self), '}' ]
-    
-    // [ self, '{' .. tostring(self) .. ']' ]
-    lua_concat(L, used);
+    lua_concat(L, used);     // [ self, '{' .. tostring(self) .. ']' ]
     return 1;
 }
 
@@ -339,6 +338,22 @@ static int mt_index(lua_State *L)
     return bad_field(L, lua_tostring(L, -1));
 }
 
+// Since `DyArray::values` is not managed by Lua, we must free it ourselves.
+// Think of this like a pseudo-destructor.
+//
+// From:    [ self ]
+// To:      []
+// Does:    free(self.values)
+static int mt_gc(lua_State *L)
+{
+    DyArray *self = check_dyarray(L, 1);
+    debug_printfln("freeing DyArray::values of length %d", self->length);
+
+    // osize > 0 && nsize == 0 invokes the equivalent of free(ptr).
+    free_pointer(L, self->values, size_of_values(self, self->capacity));
+    return 0;
+}
+
 static const luaL_reg lib_dyarray[] = {
     {"new",        &new_dyarray},
     {"get",        &get_dyarray},
@@ -354,20 +369,24 @@ static const luaL_reg mt_dyarray[] = {
     {"__index",    &mt_index},
     {"__newindex", &set_dyarray},
     {"__tostring", &mt_tostring},
+    {"__gc",       &mt_gc},
     {NULL,         NULL},
 };
 
-LUALIB_API int luaopen_dyarray(lua_State *L)
+LIB_EXPORT int luaopen_dyarray(lua_State *L)
 {
+    // Intern error message so we don't need to allocate it later on.
+    lua_pushliteral(L, LIB_MEMERR); // [ LIB_MEMERRR ]
+    lua_pop(L, 1);                  // []
+
     // See:
     // https://www.lua.org/manual/5.1/manual.html#luaL_newmetatable
     // https://www.lua.org/manual/5.1/manual.html#luaL_register
-    // Unique metatable identifier that hopefully does not clash.
-    luaL_newmetatable(L, MT_NAME);           // [ mt ]
-    luaL_register(L, NULL, mt_dyarray);      // [ mt ], reg. mt_dyarray to mt (top)
-    luaL_register(L, LIB_NAME, lib_dyarray); // [ mt, dyarray ], reg. lib_dyarray to _G.dyarray
-    
-    lua_pushcfunction(L, &dump_table);
-    lua_setglobal(L, "dump_table");
+    luaL_newmetatable(L, LIB_MTNAME);        // [ mt ]
+    luaL_register(L, NULL, mt_dyarray);      // [ mt ], reg(mt, mt_dyarray)
+    luaL_register(L, LIB_NAME, lib_dyarray); // [ mt, dyarray ], reg(_G.dyarray, lib_dyarray)
+
+    lua_pushcfunction(L, &dump_table); // [ mt, dyarray, dump_table ]
+    lua_setglobal(L, "dump_table");    // [ mt, dyarray ] ; _G.dump_table == dump_table
     return 0;
 }
