@@ -31,17 +31,91 @@ typedef struct {
     lua_Number *values;   // Heap-allocated 1D array.
 } DyArray;
 
-#define size_of_values(self, n)  size_of_array((self)->values, n)
+#define size_of_values(self, n) size_of_array((self)->values, n)
+#define size_of_active(self)    size_of_values((self), (self)->length)
+#define size_of_total(self)        size_of_values((self), (self)->capacity)
 
 #ifdef _DEBUG
 #define debug_printf(fmt, ...)      printf("[DEBUG]: " fmt, __VA_ARGS__)
 #define debug_printfln(fmt, ...)    debug_printf(fmt "\n", __VA_ARGS__)
 #define debug_println(s)            debug_printfln("%s", s)
+#define debug_action(act, fmt, ...) debug_printfln(act " " LIB_NAME "::values " fmt, __VA_ARGS__)
 #else
 #define debug_printf(fmt, ...)
 #define debug_printfln(fmt, ...)
 #define debug_println(s)
+#define debug_action(act, fmt, ...)
 #endif
+
+// HELPERS ----------------------------------------------------------------- {{{
+
+/**
+ * @brief   May throw if metatable does not match.
+ *          `luaL_checkudata()` checks the stack index against the given
+ *          metatable name. This name may be found in the registry.
+ *
+ * @note    As of Lua 5.1 `luaL_checkudata()` throws by itself.
+ *          See: https://www.lua.org/manual/5.1/manual.html#7.3
+ */
+static DyArray *argcheck_dyarray(lua_State *L, int argn)
+{
+    return luaL_checkudata(L, argn, LIB_MTNAME);
+}
+
+// Convert a relative Lua 1-based index to an absolute C 0-based index.
+static int resolve_index(DyArray *self, int i)
+{
+    return (i < 0) ? self->length + i : i - 1;
+}
+
+// NOTE: 1-based index!
+static int argcheck_index(lua_State *L, DyArray *self, int argn)
+{
+    int i = resolve_index(self, luaL_checkint(L, argn));
+    luaL_argcheck(L, 0 <= i && i < self->length, argn, "index out of range");
+    return i;
+}
+
+static lua_Number *get_item(lua_State *L)
+{
+    DyArray *self = argcheck_dyarray(L, 1);
+    return &self->values[argcheck_index(L, self, 2)];
+}
+
+// Assumes `start` and `stop` are both 0-based indexes.
+static lua_Number *c_clear_values(lua_Number *dst, int start, int stop)
+{
+    debug_action("clearing", "%i to %i", start, stop);
+    for (int i = start; i < stop; i++)
+        dst[i] = 0;
+    return dst;
+}
+
+// Assumes `len` also refers to 1 past the last valid 0-based index.
+static lua_Number *c_copy_values(lua_Number *dst, lua_Number *src, int len)
+{
+    debug_action("copying", "0 to %i", len);
+    for (int i = 0; i < len; i++)
+        dst[i] = src[i];
+    return dst;
+}
+
+static int l_bad_index(lua_State *L, int i)
+{
+    const char *tname = luaL_typename(L, -1);
+    return luaL_error(L, "non-number at index %d (a %s value)", i, tname);
+}
+
+// TODO: Check for integer overflow
+static int next_power_of_2(int x)
+{
+    int n = 8;
+    while (n < x)
+        n *= 2;
+    return n;
+}
+
+// }}} -------------------------------------------------------------------------
 
 static void print_value(lua_State *L, int i)
 {
@@ -111,19 +185,16 @@ static int dump_table(lua_State *L)
     return 0;
 }
 
-static int bad_index(lua_State *L, int i)
+static DyArray *c_new_dyarray(lua_State *L, int len, int cap)
 {
-    const char *tname = luaL_typename(L, -1);
-    return luaL_error(L, "non-number at index %d (a %s value)", i, tname);
-}
-
-// TODO: Check for integer overflow
-static int next_power_of_2(int x)
-{
-    int n = 8;
-    while (n <= x)
-        n *= 2;
-    return n;
+    DyArray *self  = lua_newuserdata(L, sizeof(*self)); // [ ...args, self ]
+    self->length   = len;
+    self->capacity = cap;
+    self->values   = new_pointer(L, size_of_total(self));
+    
+    luaL_getmetatable(L, LIB_MTNAME); // [ ...args, self, mt ]
+    lua_setmetatable(L, -2);          // [ ...args, self ] ; setmetatable(self, mt)
+    return self;
 }
 
 // From: [ t ]
@@ -133,59 +204,37 @@ static int next_power_of_2(int x)
 static int new_dyarray(lua_State *L)
 {
     DyArray *self;
-
+    int      len, cap;
+    
     luaL_checktype(L, 1, LUA_TTABLE);
-    self           = lua_newuserdata(L, sizeof(*self)); // [ t, self ]
-    self->length   = cast_int(lua_objlen(L, 1));
-    self->capacity = next_power_of_2(self->length);
-    self->values   = new_pointer(L, size_of_values(self, self->capacity));
-
-    luaL_getmetatable(L, LIB_MTNAME); // [ t, self, mt ]
-    lua_setmetatable(L, -2);          // [ t, self ] ; setmetatable(self, mt)
+    len  = cast_int(lua_objlen(L, 1));
+    cap  = next_power_of_2(len);
+    self = c_new_dyarray(L, len, cap); // [ t, self ]
 
     for (int i = 1; i <= self->length; i++) {
         lua_rawgeti(L, 1, i); // [ t, self, t[i] ]
         if (lua_isnumber(L, -1))
             self->values[i - 1] = lua_tonumber(L, -1);
         else
-            return bad_index(L, i); // Will call __gc if applicable.
+            return l_bad_index(L, i); // Will call __gc if applicable.
         lua_pop(L, 1); // [ t, self ]
     }
-    // Zero out uninitialized region.
-    for (int i = self->length + 1; i <= self->capacity; i++)
-        self->values[i - 1] = 0;
-    return 1; // self already on top of stack
+    c_clear_values(self->values, self->length, self->capacity);
+    return 1; // [ t, self ]
 }
 
-/**
- * @brief   May throw if metatable does not match.
- *          `luaL_checkudata()` checks the stack index against the given
- *          metatable name. This name may be found in the registry.
- *
- * @note    As of Lua 5.1 `luaL_checkudata()` throws by itself.
- *          See: https://www.lua.org/manual/5.1/manual.html#7.3
- */
-static DyArray *check_dyarray(lua_State *L, int argn)
+// From:    [ self ]
+// To:      [ self:copy() ]
+static int copy_dyarray(lua_State *L)
 {
-    return luaL_checkudata(L, argn, LIB_MTNAME);
-}
+    DyArray *self = argcheck_dyarray(L, 1);
+    int      len  = self->length;
+    int      cap  = self->capacity;
+    DyArray *copy = c_new_dyarray(L, len, cap); // [ self, copy ]
 
-static int resolve_index(DyArray *self, int i)
-{
-    return (i < 0) ? self->length + i + 1 : i;
-}
-
-static int check_index(lua_State *L, DyArray *self, int argn)
-{
-    int i = resolve_index(self, luaL_checkint(L, argn));
-    luaL_argcheck(L, 1 <= i && i <= self->length, argn, "index out of range");
-    return i;
-}
-
-static double *get_item(lua_State *L)
-{
-    DyArray *self = check_dyarray(L, 1);
-    return &self->values[check_index(L, self, 2) - 1];
+    c_copy_values(copy->values, self->values, len);
+    c_clear_values(copy->values, len, cap);
+    return 1; // [ self, copy ]
 }
 
 // From: [ self, index ]
@@ -222,21 +271,20 @@ static int set_dyarray(lua_State *L)
 }
 
 // We assume that the allocator will free the old pointer upon resizing.
+// We also assume that the allocator will handle reallocation requests for the
+// same size.
 //
 // From:    [ self, ...args ]
 // To:      [ self ]
 static int c_resize_dyarray(lua_State *L, DyArray *self, int nlen, int ncap)
 {
-    size_t      osz = size_of_values(self, self->capacity); // old size.
-    size_t      nsz = size_of_values(self, ncap);           // new size.
+    size_t      osz = size_of_total(self);
+    size_t      nsz = size_of_values(self, ncap);
     lua_Number *tmp = resize_pointer(L, self->values, osz, nsz);
-    debug_printfln("resizing DyArray::values from %d to %d", self->capacity, ncap);
+    debug_action("resizing", "from %d to %d", self->capacity, ncap);
 
     // If we extended, zero out the new region.
-    for (int i = self->length + 1; i <= ncap; i++)
-        tmp[i - 1] = 0;
-
-    self->values   = tmp;
+    self->values   = c_clear_values(tmp, self->length, ncap);
     self->length   = nlen;
     self->capacity = ncap;
     lua_pushvalue(L, 1); // [ self, ...args, self ]
@@ -248,25 +296,29 @@ static int c_resize_dyarray(lua_State *L, DyArray *self, int nlen, int ncap)
 // Does:    resize(self, nlen)
 static int resize_dyarray(lua_State *L)
 {
-    DyArray *self = check_dyarray(L, 1);
+    DyArray *self = argcheck_dyarray(L, 1);
     int      nlen = luaL_checkint(L, 2);
-    if (nlen <= 0)
+    if (nlen < 0)
         return luaL_error(L, "Cannot resize " LIB_NAME_Q " to %d items", nlen);
     else
-        return c_resize_dyarray(L, self, nlen, nlen);
+        return c_resize_dyarray(L, self, nlen, next_power_of_2(nlen));
 }
 
+// Assumes `c_idx` is, well, 0-based.
+//
 // From: [ self, ...args ]
 // To:   [ self ]
-static int c_insert_dyarray(lua_State *L, DyArray *self, int idx, lua_Number n)
+static int c_insert_dyarray(lua_State *L, DyArray *self, int c_idx, lua_Number n)
 {
-    // Need to grow?
-    if (idx > self->capacity)
-        c_resize_dyarray(L, self, idx, next_power_of_2(idx));
+    // cap of 4 means last valid C index is 3, so c_idx of 4 warrants a realloc.
+    if (c_idx >= self->capacity)
+        c_resize_dyarray(L, self, c_idx, next_power_of_2(c_idx));
 
-    self->values[idx - 1] = n;
-    if (idx > self->length)
-        self->length = idx;
+    self->values[c_idx] = n;
+
+    // length refers to 1 past last valid C index, so if true we need to update.
+    if (c_idx >= self->length)
+        self->length = c_idx + 1;
 
     lua_pushvalue(L, 1);
     return 1;
@@ -277,9 +329,12 @@ static int c_insert_dyarray(lua_State *L, DyArray *self, int idx, lua_Number n)
 // Does:    i > self.length ? resize(self, i); self.values[i] = v
 static int insert_dyarray(lua_State *L)
 {
-    DyArray   *self = check_dyarray(L, 1);
+    DyArray   *self = argcheck_dyarray(L, 1);
     int        idx  = resolve_index(self, luaL_checkint(L, 2));
     lua_Number n    = luaL_checknumber(L, 3);
+    // Inserting to Lua index 0 resolves to C index -1 which is unwriteable.
+    if (idx < 0)
+        return luaL_error(L, "0 is not a valid " LIB_NAME " index");
     return c_insert_dyarray(L, self, idx, n);
 }
 
@@ -288,16 +343,16 @@ static int insert_dyarray(lua_State *L)
 // Does:    resize(self, self.length + 1), self.values[self.length] = v
 static int push_dyarray(lua_State *L)
 {
-    DyArray   *self = check_dyarray(L, 1);
+    DyArray   *self = argcheck_dyarray(L, 1);
     lua_Number n    = luaL_checknumber(L, 2);
-    return c_insert_dyarray(L, self, self->length + 1, n);
+    return c_insert_dyarray(L, self, self->length, n);
 }
 
 // From: [ self ]
 // To:   [ self:length() ]
 static int length_dyarray(lua_State *L)
 {
-    lua_pushinteger(L, check_dyarray(L, 1)->length);
+    lua_pushinteger(L, argcheck_dyarray(L, 1)->length);
     return 1;
 }
 
@@ -305,7 +360,7 @@ static int length_dyarray(lua_State *L)
 // To:   [ tostring(self) ]
 static int mt_tostring(lua_State *L)
 {
-    DyArray *self = check_dyarray(L, 1);
+    DyArray *self = argcheck_dyarray(L, 1);
     int      len  = self->length;
     int      used = len + 2;
 
@@ -314,11 +369,11 @@ static int mt_tostring(lua_State *L)
 
     // In the Lua API format string functionality, %i is unsupported.
     lua_pushfstring(L, LIB_NAME "(length = %d, {", len); // [ self, '{' ]
-    for (int i = 1; i <= len; i++) {
-        lua_pushnumber(L, self->values[i - 1]); // [ self, '{', f]
+    for (int i = 0; i < len; i++) {
+        lua_pushnumber(L, self->values[i]); // [ self, '{', f]
 
         // Not at last element?
-        if (i < len) {
+        if (i < len - 1) {
             lua_pushstring(L, ", "); // [ self, '{', f, ", " ]
             lua_concat(L, 2);        // [ self, '{', f .. ", " ]
         }
@@ -352,11 +407,11 @@ static int mt_index(lua_State *L)
 // Does:    free(self.values)
 static int mt_gc(lua_State *L)
 {
-    DyArray *self = check_dyarray(L, 1);
-    debug_printfln("freeing DyArray::values of length %d", self->length);
+    DyArray *self = argcheck_dyarray(L, 1);
+    debug_action("freeing", "of length %d", self->length);
 
     // osize > 0 && nsize == 0 invokes the equivalent of free(ptr).
-    free_pointer(L, self->values, size_of_values(self, self->capacity));
+    free_pointer(L, self->values, size_of_total(self));
     return 0;
 }
 
@@ -367,6 +422,7 @@ static const luaL_reg lib_dyarray[] = {
     {"insert",     &insert_dyarray},
     {"push",       &push_dyarray},
     {"resize",     &resize_dyarray},
+    {"copy",       &copy_dyarray},
     {"length",     &length_dyarray},
     {NULL,         NULL},
 };
