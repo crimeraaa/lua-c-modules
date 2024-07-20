@@ -14,7 +14,11 @@
  *
  *          -o:     Number of values popped by the function.
  *          +p:     Number of values pushed by the function.
- *          x:      Type of error, if any, thrown by the function.
+ *          x:      Type of error, if any, thrown by the function:
+ *                  '-':    never throws an error.
+ *                  'm':    memory error.
+ *                  'v':    purposely thrown.
+ *                  'e':    other kind of error.
  *
  *          Note that at least for Lua 5.1, function arguments are popped before
  *          the return values.
@@ -63,9 +67,11 @@ static int l_checkarg_index(lua_State *L, DyArray *self, int argn)
     return i;
 }
 
-// Assumes stack is in the form `[ self, index ]`.
-//
-// Return a valid pointer to an element within `DyArray::values`.
+/**
+ * @return  Valid pointer to an element within `self.values`.
+ *
+ * @note    Assumes stack is: [ [1] = self, [2] = index, ...args ].
+ */
 static lua_Number *l_poke_value(lua_State *L)
 {
     DyArray *self = l_checkarg_dyarray(L, 1);
@@ -90,10 +96,20 @@ static lua_Number *c_copy_values(lua_Number *dst, lua_Number *src, int len)
     return dst;
 }
 
-static int l_bad_index(lua_State *L, int i)
+static int bad_newtype(lua_State *L, const char *tname)
+{
+    return LIB_ERROR(L, "Cannot create new " LIB_QNAME " from %s", tname);
+}
+
+static int bad_index(lua_State *L, int i)
 {
     const char *tname = luaL_typename(L, -1);
-    return LIB_ERROR(L, "non-number at index %d (a %s value)", i, tname);
+    return LIB_ERROR(L, "Non-number at index %d (a %s value)", i, tname);
+}
+
+static int bad_field(lua_State *L, const char *field)
+{
+    return LIB_ERROR(L, "Unknown field " LUA_QS, field);
 }
 
 // TODO: Check for integer overflow
@@ -104,8 +120,6 @@ static int next_power_of_2(int x)
         n *= 2;
     return n;
 }
-
-// }}} -------------------------------------------------------------------------
 
 static void print_value(lua_State *L, int i)
 {
@@ -164,22 +178,27 @@ static int c_dump_table(lua_State *L, int t_idx)
     return 0;
 }
 
-// From:    [ t ]
-// To:      []
 static int dump_table(lua_State *L)
 {
     return lua_istable(L, 1) ? c_dump_table(L, 1) : luaL_typerror(L, 1, "table");
 }
 
+// }}} -------------------------------------------------------------------------
+
 // METHODS ---------------------------------------------------------------- {{{1
 
-// From:    [ ...args ]
-// To:      [ ...args, self ]
+/**
+ * @exception lua_newuserdata(): memory
+ *
+ * @note    Stack usage:    [ 0, +1, m ]
+ *          Stack before:   [ ...args ]
+ *          Stack after:    [ ...args, self ]
+ */
 static DyArray *c_new_dyarray(lua_State *L, int len, int cap)
 {
     DyArray *self  = lua_newuserdata(L, sizeof(*self)); // [ ...args, self ]
 
-    DBG_PRINTFLN("new " LIB_NAME_Q " of length %i, capacity %i", len, cap);
+    DBG_PRINTFLN("new " LIB_QNAME " of length %d, capacity %d", len, cap);
     self->length   = len;
     self->capacity = cap;
     self->values   = new_pointer(L, size_of_total(self));
@@ -189,37 +208,65 @@ static DyArray *c_new_dyarray(lua_State *L, int len, int cap)
     return self;
 }
 
-// From: [ t? ]
-// To:   [ self ]
-//
-// https://www.lua.org/pil/28.1.html
+/**
+ * @exception <args[1]>:       type
+ *            c_new_dyarray(): memory
+ *            <for-body>:      index
+ *
+ * @note    Stack usage:    [ -(0|1), +1, m|v ]
+ *          Stack before:   [ data?: number[] ]
+ *          Stack after:    [ self: dyarray ]
+ *
+ * @see     https://www.lua.org/pil/28.1.html
+ */
 static int new_dyarray(lua_State *L)
 {
     DyArray *self;
     int      len, cap;
 
-    if (!lua_isnoneornil(L, 1))
-        luaL_checktype(L, 1, LUA_TTABLE);
+    switch (lua_type(L, 1)) {
+    case LUA_TNONE:
+    case LUA_TNIL:
+        len = 0;
+        break;
+    case LUA_TTABLE:
+        len = cast_int(lua_objlen(L, 1));
+        break;
+    case LUA_TUSERDATA:
+        // If true: [ data, #data ]
+        if (luaL_callmeta(L, 1, "__len")) {
+            len = cast_int(lua_tointeger(L, -1));
+            lua_pop(L, 1); // [ data, #data ] -> [ data ]
+            break;
+        }
+        // Else fall through
+    default:
+        return bad_newtype(L, luaL_typename(L, 1));
+    }
 
-    // If none/nil arg, this will be 0.
-    len  = cast_int(lua_objlen(L, 1));
     cap  = next_power_of_2(len);
     self = c_new_dyarray(L, len, cap); // [ t, self ]
-    // If we created an empty instance this should not run.
     for (int i = 1; i <= len; i++) {
-        lua_rawgeti(L, 1, i); // [ t, self, t[i] ]
+        lua_pushinteger(L, i); // [ t, self, i ]
+        lua_gettable(L, 1);    // [ t, self, t[i] ] ; may call metamethod.
         if (lua_isnumber(L, -1))
             self->values[i - 1] = lua_tonumber(L, -1);
         else
-            return l_bad_index(L, i); // Will call __gc if applicable.
+            return bad_index(L, i); // Will also call __gc.
         lua_pop(L, 1); // [ t, self ]
     }
     c_clear_values(self->values, len, cap);
     return 1;
 }
 
-// From:    [ self ]
-// To:      [ self:copy() ]
+/**
+ * @exception <args[1]>:       type
+ *            c_new_dyarray(): memory
+ *
+ * @note    Stack usage:    [ -1, +1, m|v ]
+ *          Stack before:   [ self: dyarray ]
+ *          Stack after:    [ self:copy(): dyarray ]
+ */
 static int copy_dyarray(lua_State *L)
 {
     DyArray *self = l_checkarg_dyarray(L, 1);
@@ -232,21 +279,29 @@ static int copy_dyarray(lua_State *L)
     return 1;
 }
 
-// From: [ self, index ]
-// To:   [ self[index] ]
+/**
+ * @exception <args[:]>: type
+ *            <args[2]>: index
+ *
+ * @note    Stack usage:    [ -2, +1, v ]
+ *          Stack before:   [ self: dyarray, index: integer ]
+ *          Stack after:    [ self[index]: number ]
+ */
 static int get_dyarray(lua_State *L)
 {
     lua_pushnumber(L, *l_poke_value(L));
     return 1;
 }
 
-static int bad_field(lua_State *L, const char *s)
-{
-    return LIB_ERROR(L, "Unknown field " LUA_QS, s);
-}
-
-// From: [ self, key ]
-// To:   [ array[key] ]
+/**
+ * @exception <args[:]>: type
+ *            <return>:  field
+ *
+ * @note    Stack usage:    [ -2, +1, v ]
+ *          Stack before:   [ self: dyarray, key: string ]
+ *          Stack after:    [ array[key]: function ]
+ *
+ */
 static int get_field(lua_State *L)
 {
     const char *s = luaL_checkstring(L, 2);
@@ -255,9 +310,14 @@ static int get_field(lua_State *L)
     return lua_isnil(L, -1) ? bad_field(L, s) : 1;
 }
 
-// From:   [ self, index, value ]
-// To:     [ self ]
-// Does:   self.values[index] = value
+/**
+ * @exception <args[:]>: type
+ *
+ * @note    Stack usage:    [ -3, +1, v ]
+ *          Stack before:   [ self: dyarray, i: integer, v: number ]
+ *          Stack after:    [ self: dyarray ]
+ *          Side effects:   self.values[index] = value
+ */
 static int set_dyarray(lua_State *L)
 {
     *l_poke_value(L) = luaL_checknumber(L, 3);
@@ -265,12 +325,17 @@ static int set_dyarray(lua_State *L)
     return 1;
 }
 
-// We assume that the allocator will free the old pointer upon resizing.
-// We also assume that the allocator will handle reallocation requests for the
-// same size.
-//
-// From:    [ self, ...args ]
-// To:      [ self ]
+/**
+ * @brief   We assume that the allocator will free the old pointer upon resizing.
+ *          We also assume that the allocator will handle reallocation requests
+ *          for the same size.
+ *
+ * @exception resize_pointer(): memory
+ *
+ * @note    Stack usage:    [ -0, +1, m ]
+ *          Stack before:   [ self: dyarray, ...args: any ]
+ *          Stack after:    [ self, args, self ]
+ */
 static int c_resize_dyarray(lua_State *L, DyArray *self, int nlen, int ncap)
 {
     size_t      osz = size_of_total(self);
@@ -286,10 +351,13 @@ static int c_resize_dyarray(lua_State *L, DyArray *self, int nlen, int ncap)
     return 1;
 }
 
-// Assumes `c_idx` is, well, 0-based. Also assumes we verified the size and such.
-//
-// From: [ self, ...args ]
-// To:   [ self ]
+/**
+ * @brief   Assumes `c_idx` is, well, 0-based. Also assumes we verified the size
+ *          and such.
+ *
+ * @note    Stack before:   [ self: dyarray, ...args: any ]
+ *          Stack after:    [ self, ...args, self ]
+ */
 static int c_insert_dyarray(lua_State *L, DyArray *self, int c_idx, lua_Number n)
 {
     int len = self->length;
@@ -317,9 +385,14 @@ static int c_remove_dyarray(lua_State *L, DyArray *self, int c_idx)
     return 1;
 }
 
-// From:    [ self, nlen ]
-// To:      []
-// Does:    resize(self, nlen)
+/**
+ * @exception <args[:]>:  type
+ *            (nlen < 0): memory
+ *
+ * @note    Stack before:   [ self: dyarray, nlen: integer ]
+ *          Stack after:    []
+ *          Side effects:   self.values = realloc(self.values, nlen)
+ */
 static int resize_dyarray(lua_State *L)
 {
     DyArray *self = l_checkarg_dyarray(L, 1);
@@ -330,10 +403,17 @@ static int resize_dyarray(lua_State *L)
         return c_resize_dyarray(L, self, nlen, next_power_of_2(nlen));
 }
 
-// From:    [ self, i, v ]
-// To:      [ self ]
-// Does:    i > self.length ? resize(self, i); self.values[i] = v
-// Note:    If `i` is not currently in range, we will throw.
+/**
+ * @exception <args[:]>: type
+ *            <args[2]>: index
+ *
+ * @note    Stack usage:    [ -3, +1, v ]
+ *          Stack before:   [ self: dyarray, i: integer, v: number ]
+ *          Stack after:    [ self: dyarray ]
+ *          Side effects:   self.values[i] = v
+ *
+ * @note    If `i` is not currently in range, we will throw.
+ */
 static int insert_dyarray(lua_State *L)
 {
     DyArray   *self  = l_checkarg_dyarray(L, 1);
@@ -342,10 +422,16 @@ static int insert_dyarray(lua_State *L)
     return c_insert_dyarray(L, self, c_idx, n);
 }
 
-// From:    [ self, i ]
-// To:      [ self.values[i] ]
-// Does:    table.remove(self.values, i)
-// Note:    Like `dyarray.insert`, we will throw on invalid relative indexes.
+/**
+ * @exception <args[:]>: type
+ *            <args[2]>: index
+ *
+ * @note    Stack usage:    [ -2, +1, v ]
+ *          Stack before:   [ self, i ]
+ *          Stack after:    [ self.values[i] ]
+ *          Side effects:   table.remove(self.values, i)
+ *                          self.length -= 1
+ */
 static int remove_dyarray(lua_State *L)
 {
     DyArray *self  = l_checkarg_dyarray(L, 1);
@@ -355,10 +441,17 @@ static int remove_dyarray(lua_State *L)
 
 // PUSH AND POP ----------------------------------------------------------- {{{2
 
-// From:    [ self, v ]
-// To:      [ self ]
-// Does:    resize(self, self.length + 1), self.values[self.length] = v
-static int push_back_dyarray(lua_State *L)
+/**
+ * @exception <args[:]>:          type
+ *            c_resize_dyarray(): memory
+ *
+ * @note    Stack usage:    [ -2, +1, m|v ]
+ *          Stack before:   [ self, v ]
+ *          Stack after:    [ self ]
+ *          Side effects:   realloc(self.values, self.length + 1)
+ *                          self.values[self.length] = v
+ */
+static int push_dyarray(lua_State *L)
 {
     DyArray   *self = l_checkarg_dyarray(L, 1);
     int        len  = self->length;
@@ -371,10 +464,15 @@ static int push_back_dyarray(lua_State *L)
     return c_insert_dyarray(L, self, len, n);
 }
 
-// From:    [ self ]
-// To:      [ self[self.length] ]
-// Does:    self.length -= 1
-static int pop_back_dyarray(lua_State *L)
+/**
+ * @exception len <= 0: index
+ *
+ * @note    Stack usage:    [ -1, +1, v ]
+ *          Stack before:   [ self ]
+ *          Stack after:    [ self[self.length] ]
+ *          Side effect:    self.length -= 1
+ */
+static int pop_dyarray(lua_State *L)
 {
     DyArray *self = l_checkarg_dyarray(L, 1);
     int      len  = self->length;
@@ -385,8 +483,13 @@ static int pop_back_dyarray(lua_State *L)
 
 // 2}}} ------------------------------------------------------------------------
 
-// From: [ self ]
-// To:   [ self:length() ]
+/**
+ * @exception <args[1]>: type
+ *
+ * @note    Stack usage:    [ -1, +1, v ]
+ *          Stack before:   [ self ]
+ *          Stack after:    [ self:length() ]
+ */
 static int length_dyarray(lua_State *L)
 {
     lua_pushinteger(L, l_checkarg_dyarray(L, 1)->length);
@@ -397,31 +500,45 @@ static int length_dyarray(lua_State *L)
 
 // METATABLES ------------------------------------------------------------- {{{1
 
-// From: [ self ]
-// To:   [ tostring(self) ]
+/**
+ * @exception <args[1]>:         type
+ *            lua_pushfstring(): memory
+ *            luaL_add*:         memory
+ *
+ * @note    Stack usage:    [ -1, +1, m|v ]
+ *          Stack before:   [ self ]
+ *          Stack after:    [ tostring(self) ]
+ */
 static int mt_tostring(lua_State *L)
 {
     DyArray    *self = l_checkarg_dyarray(L, 1);
     int         len  = self->length;
     luaL_Buffer buf;
+
     luaL_buffinit(L, &buf);
     lua_pushfstring(L, LIB_MESSAGE("length = %d, values = {", len));
-    luaL_addvalue(&buf); // [ self, format ] -> [ self ]
+    luaL_addvalue(&buf); // [ self, fmt ] -> [ self ]
+
     for (int i = 0; i < len; i++) {
-        lua_Number n = self->values[i];
+        lua_pushnumber(L, self->values[i]);
+        luaL_addvalue(&buf); // [ self, self.values[i] ] -> [ self ]
         if (i < len - 1)
-            lua_pushfstring(L, "%f, ", n);
-        else
-            lua_pushnumber(L, n);
-        luaL_addvalue(&buf); // [ self, n ] -> [ self ]
+            luaL_addstring(&buf, ", ");
     }
+
     luaL_addchar(&buf, '}');
-    luaL_pushresult(&buf); // [ self, tostring(self) ]
+    luaL_pushresult(&buf);
     return 1;
 }
 
-// From: [ self, key ]
-// To:   [ self[key] ]
+/**
+ * @exception <args[2]>: type, index, field
+ *
+ * @note    Stack usage:  [ -2, +1, v ]
+ *          Stack before: [ self: dyarray, key: number|string ]
+ *          Stack after:  [ self[key]: number|function ]
+ *
+*/
 static int mt_index(lua_State *L)
 {
     switch (lua_type(L, 2)) {
@@ -435,12 +552,17 @@ static int mt_index(lua_State *L)
     return bad_field(L, call_tostring(L, 3, 4));
 }
 
-// Since `DyArray::values` is not managed by Lua, we must free it ourselves.
-// Think of this like a pseudo-destructor.
-//
-// From:    [ self ]
-// To:      []
-// Does:    free(self.values)
+/**
+ * @brief   `dyarray.values` is not managed by Lua, we must free it ourselves.
+ *          Think of this like a pseudo-destructor.
+ *
+ * @exception <args[1]>: type
+ *
+ * @note    Stack usage:    [ -1, 0, - ]
+ *          Stack before:   [ self: dyarray ]
+ *          Stack after:    []
+ *          Side effect:    free(self.values)
+ */
 static int mt_gc(lua_State *L)
 {
     DyArray *self = l_checkarg_dyarray(L, 1);
@@ -453,27 +575,27 @@ static int mt_gc(lua_State *L)
 
 // 1}}} ------------------------------------------------------------------------
 
-static const luaL_reg lib_fns[] = {
-    {"new",        &new_dyarray},
-    {"get",        &get_dyarray},
-    {"set",        &set_dyarray},
+static const luaL_Reg lib_fns[] = {
+    {"new",         &new_dyarray},
+    {"get",         &get_dyarray},
+    {"set",         &set_dyarray},
 
     // Explicit index manipulation
-    {"insert",     &insert_dyarray},
-    {"remove",     &remove_dyarray},
+    {"insert",      &insert_dyarray},
+    {"remove",      &remove_dyarray},
 
     // Implicit index manipulation
-    {"push_back",  &push_back_dyarray},
-    {"pop_back",   &pop_back_dyarray},
+    {"push",        &push_dyarray},
+    {"pop",         &pop_dyarray},
 
     // Pseudo memory management
-    {"resize",     &resize_dyarray},
-    {"copy",       &copy_dyarray},
-    {"length",     &length_dyarray},
-    {NULL,         NULL},
+    {"resize",      &resize_dyarray},
+    {"copy",        &copy_dyarray},
+    {"length",      &length_dyarray},
+    {NULL,          NULL},
 };
 
-static const luaL_reg mt_fns[] = {
+static const luaL_Reg mt_fns[] = {
     {"__index",    &mt_index},
     {"__newindex", &set_dyarray},
     {"__tostring", &mt_tostring},
