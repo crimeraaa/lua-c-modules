@@ -8,13 +8,13 @@
 ---@field m_capacity integer
 dyarray = {}
 
----@param t number[]
+---@param t? number[]
 function dyarray.new(t)
     ---@type dyarray
     local inst      = setmetatable({}, dyarray)
-    inst.m_values   = t
-    inst.m_length   = #t
-    inst.m_capacity = inst.m_length;
+    inst.m_values   = t or {}
+    inst.m_length   = t and #t or 0
+    inst.m_capacity = inst.m_length
     return inst
 end
 
@@ -53,10 +53,19 @@ function dyarray:insert(i, v)
 end
 
 ---@param v number
-function dyarray:push(v)
+function dyarray:push_back(v)
     return self:insert(self.m_length + 1, v)
+end
+
+function dyarray:pop_back()
+    local v = self.m_values[self.m_length]
+    self.m_length = self.m_length - 1
+    return v
 end
 
 function dyarray:length()
     return self.m_length
 end
+
+-- Convenience return value.
+return dyarray

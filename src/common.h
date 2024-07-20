@@ -11,6 +11,20 @@
 #define LIB_MTNAME      "C_Modules" LIB_NAME
 #define LIB_MEMERR      "Out of memory (module " LIB_NAME_Q ")"
 
+#define LIB_MESSAGE(fmt, ...)   LIB_NAME ": " fmt, __VA_ARGS__
+#define LIB_ERROR(L, fmt, ...)  luaL_error((L), LIB_MESSAGE(fmt, __VA_ARGS__))
+
+#ifdef _DEBUG
+#define DBG_PRINTF(fmt, ...)    printf("[DEBUG] " LIB_NAME ": " fmt, __VA_ARGS__)
+#define DBG_PRINTFLN(fmt, ...)  DBG_PRINTF(fmt "\n", __VA_ARGS__)
+#define DBG_PRINTLN(s)          DBG_PRINTFLN("%s", s)
+#else
+#define DBG_PRINTF(fmt, ...)
+#define DBG_PRINTFLN(fmt, ...)
+#define DBG_PRINTLN(s)
+#endif
+
+
 #ifdef _WIN32
 
 // Windows needs to explicitly export symbols when building `.dll`.

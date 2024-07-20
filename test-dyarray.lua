@@ -1,10 +1,10 @@
 -- Note that we cannot name this file `dyarray.lua`!
-require "dyarray"
+local dyarray = require "dyarray"
 
 a = dyarray.new({0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 print("\nCONSTRUCTION")
 print("a               ", a)
-print("a:push(50)      ", a:push(50))
+print("a:push(50)      ", a:push_back(50))
 print("a:insert(8, 80) ", a:insert(8, 80))
 print("a:resize(16)    ", a:resize(16))
 print("a:length()      ", a:length()) --> 16
@@ -43,9 +43,22 @@ print("a[1000000]", pcall(mess_up_index, a)) --> (index out of range)
 print("\nPUSH AND INSERT")
 local b = dyarray.new{10, 20, 30, 40}
 print("b               ", b)                --> {10, 20, 30, 40}
-print("b:push(50)      ", b:push(50))       --> {10, 20, 30, 40, 50}
-print("b:insert(8, 80) ", b:insert(8, 80))  --> {10, 20, 30, 40, 50, 0, 0, 80}
+print("b:push(50)      ", b:push_back(50))  --> {10, 20, 30, 40, 50}
+-- print("b:insert(8, 80) ", b:insert(8, 80))  --> {10, 20, 30, 40, 50, 0, 0, 80}
 print("b:insert(-2, 70)", b:insert(-2, 70)) --> {10, 20, 30, 40, 50, 0, 70, 80}
 print("b:resize(4)     ", b:resize(4))
 
 --- }}} ------------------------------------------------------------------------
+
+--- PUSH AND POP --- {{{
+
+local c = dyarray.new()
+
+print("\nPUSH AND POP")
+print("c                ", c);
+print("c:push_back(10)  ", c:push_back(10))
+local popped = c:pop_back()
+print("c:pop_back()     ", popped)
+print("c                ", c)
+
+--- }}}
