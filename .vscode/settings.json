@@ -1,0 +1,33 @@
+{
+    "files.associations": {
+        "*.asm": "masm",
+        "*.h": "c",
+        ".clangd": "yaml",
+        ".clang_format": "yaml",
+        "*.lox": "swift",
+        "xstring": "cpp",
+        "xutility": "cpp",
+        "bit": "cpp",
+        "cctype": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "cstddef": "cpp",
+        "cstdint": "cpp",
+        "cstdio": "cpp",
+        "cstdlib": "cpp",
+        "cstring": "cpp",
+        "cwchar": "cpp",
+        "exception": "cpp",
+        "initializer_list": "cpp",
+        "iosfwd": "cpp",
+        "limits": "cpp",
+        "new": "cpp",
+        "stdexcept": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "utility": "cpp",
+        "xmemory": "cpp",
+        "xstddef": "cpp",
+        "xtr1common": "cpp"
+    }
+}
