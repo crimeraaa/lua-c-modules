@@ -6,34 +6,34 @@ static const BigInt BIGINT_TEST = bigint_make_from_string("1234");
 
 static void basic_tests()
 {
-    BigInt a = BIGINT_TEST;   // 1234
+    BigInt a = BIGINT_TEST;  // 1234
     bigint_push_left(a, 5);  // 51234
     bigint_print(a);
     
-    a = BIGINT_TEST;          // 1234
+    a = BIGINT_TEST;         // 1234
     bigint_push_right(a, 0); // 12340
     bigint_print(a);
     
-    a = BIGINT_TEST;          // 1234
+    a = BIGINT_TEST;         // 1234
     bigint_shift_left1(a);   // 12340
     bigint_print(a);
 
-    a = BIGINT_TEST;          // 1234
+    a = BIGINT_TEST;         // 1234
     bigint_shift_right1(a);  // 123
     bigint_print(a);
     
-    a = BIGINT_TEST;          // 1234
+    a = BIGINT_TEST;         // 1234
     bigint_pop_left(a);      // 234
     bigint_print(a);
 
-    a = BIGINT_TEST;          // 1234
+    a = BIGINT_TEST;         // 1234
     bigint_pop_right(a);     // 123
     bigint_print(a);
 }
 
 static void bufmanip_tests()
 {
-    BigInt a = BIGINT_TEST;   // 1234
+    BigInt a = BIGINT_TEST;  // 1234
     bigint_pop_left(a);      // 234
     bigint_push_right(a, 5); // 2345
     bigint_shift_left1(a);   // 23450
@@ -58,13 +58,14 @@ static void bufmanip_tests()
 
 int main()
 {
-    // basic_tests();
-    // bufmanip_tests();
+    basic_tests();
+    bufmanip_tests();
     BigInt a = bigint_make_from_string("12");
     bigint_add_at(a, 0, 1);             //   13
     bigint_add_at(a, 0, 27);            //   40
     bigint_add_at(a, a.length - 1, 6);  //  100
     bigint_add_at(a, a.length - 1, 19); // 2000
+    bigint_add_at(a, 10000, 9);         // error
     return 0;
 }
 
@@ -81,35 +82,42 @@ BigInt bigint_create()
 
 BigInt bigint_make_from_string(std::string_view sv)
 {
-    BigInt res = bigint_create();
+    BigInt self = bigint_create();
     // Iterate string right to left, but push to self left to right.
     for (auto it = sv.rbegin(); it != sv.rend(); it++) {
         char ch = *it;
         if (std::isspace(ch) || ch == '_')
             continue;
-        bigint_push_left(res, ch - '0');
+        bigint_push_left(self, ch - '0');
     }
-    return res;
+    return self;
 }
 
 // --- ARITHMETIC --------------------------------------------------------- {{{2
 
 void bigint_add_at(BigInt& self, BigInt::Index i, BigInt::Digit d)
 {
-    // WARNING: Ensure these are within range of `BigInt::Digit` when writing!
-    int sum   = bigint_read_at(self, i) + d;
-    int carry = 0;
-    
-    if (sum >= BIGINT_BASE) {
-        std::div_t res = std::div(sum, BIGINT_BASE);
-        carry = res.quot;
-        sum   = res.rem;
+    BigInt::Pair prev{i, d};
+    int sum;
+    int carry = 1; // Initialize to some nonzero so we can begin the loop.
+    while (carry != 0) {
+        sum   = bigint_read_at(self, prev.index) + prev.digit;
+        carry = 0;
+        if (sum >= BIGINT_BASE) {
+            std::div_t res = std::div(sum, BIGINT_BASE);
+            carry = res.quot;
+            sum   = res.rem;
+        }
+        DEBUG_PRINTFLN("digits[%zu] = %u + %i, sum = %u, carry = %u",
+                       prev.index,
+                       bigint_read_at(self, prev.index),
+                       prev.digit,
+                       sum,
+                       carry);
+        bigint_write_at(self, prev.index, sum);
+        prev.index += 1;
+        prev.digit = carry;
     }
-    DEBUG_PRINTFLN("digits[%zu] = %u + %u, sum = %u, carry = %u",
-                   i, bigint_read_at(self, i), d, sum, carry);
-    if (carry > 0)
-        bigint_add_at(self, i + 1, carry);
-    bigint_write_at(self, i, sum);
 
 #ifdef BIGINT_DEBUG
     bigint_print(self);
@@ -129,7 +137,8 @@ void bigint_push_left(BigInt& self, BigInt::Digit d)
     // digits[capacity] is not readable or writable.
     if (self.length >= self.capacity) {
         DEBUG_PRINTFLN("Need resize from length = %zu, capacity %zu",
-                       self.length, self.capacity);
+                       self.length,
+                       self.capacity);
     } else if (!bigint_check_digit(d)) {
         DEBUG_PRINTFLN("Cannot left-push digit %u", d);
     } else {
@@ -160,14 +169,14 @@ void bigint_shift_left1(BigInt& self)
     DEBUG_PRINTFLN("lshift(length = %zu), length++", self.length);
 
     // TODO: Fix, is unsafe if length >= capacity
-    // {4,3,2,1}   . {4,3,2,1,0}
+    // {4,3,2,1}   -> {4,3,2,1,0}
     self.length += 1;
 
-    // {4,3,2,1,0} . {4,4,3,2,1}
+    // {4,3,2,1,0} -> {4,4,3,2,1}
     for (BigInt::Index i = self.length - 1; i != 0; i--)
         self.digits[i] = self.digits[i - 1];
     
-    // {4,4,3,2,1} . {0,4,3,2,1}
+    // {4,4,3,2,1} -> {0,4,3,2,1}
     self.digits[0] = 0;
 }
 
@@ -204,10 +213,10 @@ void bigint_shift_right1(BigInt& self)
 {
     DEBUG_PRINTFLN("rshift(length = %zu), length--", self.length);
     
-    // {4,3,2,1} . {3,2,1,1}
+    // {4,3,2,1} -> {3,2,1,1}
     for (BigInt::Index i = 0; i < self.length; i++)
         self.digits[i] = self.digits[i + 1];
-    // {3,2,1,1} . {3,2,1}
+    // {3,2,1,1} -> {3,2,1}
     self.length -= 1;
     
 }
@@ -218,31 +227,51 @@ void bigint_shift_right1(BigInt& self)
 
 // --- ITERATORS ---------------------------------------------------------- {{{1
 
-BigInt::FwdIter bigint_begin(BigInt& self)
+BigInt::MutFwdIt bigint_begin(BigInt& self)
 {
     return &self.digits[0];
 }
 
-BigInt::FwdIter bigint_end(BigInt& self)
+BigInt::MutFwdIt bigint_end(BigInt& self)
 {
     return self.digits + self.length;
 }
 
-BigInt::RevIter bigint_rbegin(BigInt& self)
+BigInt::ConstFwdIt bigint_begin(const BigInt& self)
 {
-    return BigInt::RevIter(bigint_end(self));
+    return &self.digits[0]; 
 }
 
-BigInt::RevIter bigint_rend(BigInt& self)
+BigInt::ConstFwdIt bigint_end(const BigInt& self)
 {
-    return BigInt::RevIter(bigint_begin(self));
+    return self.digits + self.length;
+}
+
+BigInt::MutRevIt bigint_rbegin(BigInt& self)
+{
+    return BigInt::MutRevIt(bigint_end(self));
+}
+
+BigInt::MutRevIt bigint_rend(BigInt& self)
+{
+    return BigInt::MutRevIt(bigint_begin(self));
+}
+
+BigInt::ConstRevIt bigint_rbegin(const BigInt& self)
+{
+    return BigInt::ConstRevIt(bigint_end(self));
+}
+
+BigInt::ConstRevIt bigint_rend(const BigInt& self)
+{
+    return BigInt::ConstRevIt(bigint_begin(self));
 }
 
 // 1}}} ------------------------------------------------------------------------
 
 // --- UTILITY ------------------------------------------------------------ {{{1
 
-BigInt::Digit bigint_read_at(BigInt& self, BigInt::Index i)
+BigInt::Digit bigint_read_at(const BigInt& self, BigInt::Index i)
 {
     // Conceptually, 00001234 == 1234, so 1234[7] should be 0 even if 1234
     // only allocated for 4 digits.
@@ -267,16 +296,12 @@ void bigint_write_at(BigInt& self, BigInt::Index i, BigInt::Digit d)
     }
 }
 
-void bigint_print(BigInt& self)
+void bigint_print(const BigInt& self)
 {
-    BigInt::Index len = self.length;
-    BigInt::Index cap = self.capacity;
-
-    std::printf("digits[:%zu] = ", len);
-    
-    for (BigInt::RevIter it = bigint_rbegin(self); it != bigint_rend(self); it++)
+    std::printf("digits[:%zu] = ", self.length);
+    for (auto it = bigint_rbegin(self); it != bigint_rend(self); it++)
         std::printf("%u", *it);
-    std::printf(", length = %zu, capacity = %zu\n", len, cap);
+    std::printf(", length = %zu, capacity = %zu\n", self.length, self.capacity);
     
 #ifdef BIGINT_DEBUG
     std::printf("\n");
@@ -288,7 +313,7 @@ bool bigint_check_digit(BigInt::Digit d)
     return 0 <= d && d < BIGINT_BASE;
 }
 
-bool bigint_check_index(BigInt& self, BigInt::Index i)
+bool bigint_check_index(const BigInt& self, BigInt::Index i)
 {
     return 0 <= i && i < self.capacity;
 }

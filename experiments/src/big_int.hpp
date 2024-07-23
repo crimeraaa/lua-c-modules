@@ -10,10 +10,17 @@
 #define BIGINT_BASE 10
 
 struct BigInt {
-    using Digit    = std::uint8_t;
-    using Index    = std::size_t;
-    using FwdIter  = Digit*;
-    using RevIter  = std::reverse_iterator<FwdIter>;
+    using Digit      = std::uint8_t;
+    using Index      = std::size_t;
+    using MutFwdIt   = Digit*;
+    using MutRevIt   = std::reverse_iterator<MutFwdIt>;
+    using ConstFwdIt = const Digit*;
+    using ConstRevIt = std::reverse_iterator<ConstFwdIt>;
+
+    struct Pair {
+        BigInt::Index index;
+        BigInt::Digit digit;
+    };
     
     Digit digits[0x40];
     Index length;   // Number of active digits. &digits[length] is end().
@@ -71,19 +78,24 @@ BigInt::Digit bigint_pop_right(BigInt& self);
 
 // --- ITERATORS ---------------------------------------------------------------
 
-BigInt::FwdIter bigint_begin(BigInt& self);
-BigInt::FwdIter bigint_end(BigInt& self);
-BigInt::RevIter bigint_rbegin(BigInt& self);
-BigInt::RevIter bigint_rend(BigInt& self);
+BigInt::MutFwdIt   bigint_begin(BigInt& self);
+BigInt::MutFwdIt   bigint_end(BigInt& self);
+BigInt::MutRevIt   bigint_rbegin(BigInt& self);
+BigInt::MutRevIt   bigint_rend(BigInt& self);
+
+BigInt::ConstFwdIt bigint_begin(const BigInt& self);
+BigInt::ConstFwdIt bigint_end(const BigInt& self);
+BigInt::ConstRevIt bigint_rbegin(const BigInt& self);
+BigInt::ConstRevIt bigint_rend(const BigInt& self);
 
 // -----------------------------------------------------------------------------
 
 // --- UTILITY -----------------------------------------------------------------
 
-BigInt::Digit bigint_read_at(BigInt& self, BigInt::Index i);
+BigInt::Digit bigint_read_at(const BigInt& self, BigInt::Index i);
 void bigint_write_at(BigInt& self, BigInt::Index i, BigInt::Digit d);
-void bigint_print(BigInt& self);
+void bigint_print(const BigInt& self);
 bool bigint_check_digit(BigInt::Digit d);
-bool bigint_check_index(BigInt& self, BigInt::Index i);
+bool bigint_check_index(const BigInt& self, BigInt::Index i);
 
 // -----------------------------------------------------------------------------

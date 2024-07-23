@@ -9,7 +9,7 @@
 
 // In `"bigint_*"`, extract `*` only.
 #define DEBUG_PRINTF(fmt, ...) \
-    std::fprintf(stderr, "%s(): " fmt, &__func__[7], __VA_ARGS__)
+    std::fprintf(stderr, "%-12s: " fmt, &__func__[7], __VA_ARGS__)
 
 #else // _DEBUG not defined.
       //
