@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <string_view>
 #include "common.hpp"
 
 #define BIGINT_BASE 10

@@ -1,6 +1,4 @@
 #include <cctype>
-#include <string_view>
-#include <iterator>
 #include "common.hpp"
 #include "big_int.hpp"
 
@@ -38,6 +36,10 @@ int main()
     bigint_push_left(&a, 7);  // 723450
     bigint_push_left(&a, 10); // error
     bigint_print(&a);
+    
+    printf("a[0]  = %u\n", bigint_read_at(&a, 0));  // digits[0] = 0
+    printf("a[1]  = %u\n", bigint_read_at(&a, 1));  // digits[1] = 5
+    printf("a[-1] = %u\n", bigint_read_at(&a, -1)); // digits[-1] = 7
     return 0;
 }
 
@@ -201,7 +203,7 @@ BigInt::RevIt bigint_rend(BigInt* self)
 
 BigInt::Size bigint_resolve_index(BigInt* self, BigInt::Index i)
 {
-    return (i >= 0) ? i : self->length - i;
+    return (i >= 0) ? i : self->length + i;
 }
 
 bool bigint_check_digit(BigInt::Digit d)
