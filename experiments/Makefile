@@ -2,14 +2,26 @@ CC 		 := cl
 CC_FLAGS := -nologo -EHsc -std:c++17 -W3 -WX -Fe"bin/" -Fo"obj/"
 
 .PHONY: all
-all: bin/big_int.exe
+all: debug
+	
+# /Od		disable optimizations (default).
+# /Zi		enable debugging information.
+# /D<macro>	define <macro> for this compilation unit.
+# 			NOTE: #define _DEBUG in MSVC requires linking to a debug lib.
+# /MDd		linked with MSVCRTD.LIB debug lib. Also defines _DEBUG.
+.PHONY: debug
+debug: CC_FLAGS += -Od -DBIGINT_DEBUG
+debug: build
+	
+.PHONY: build
+build: bin/big_int.exe
 
 bin obj:
 	$(MKDIR) $@
 
-bin/%.exe: src/%.cpp | bin obj
+bin/big_int.exe: src/big_int.cpp src/common.hpp | bin obj
 	$(CC) $(CC_FLAGS) $<
-	
+
 .PHONY: clean
 clean:
 	$(RM) bin/big_int.exe obj/big_int.obj
