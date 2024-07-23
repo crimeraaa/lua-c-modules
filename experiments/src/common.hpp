@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <stdexcept>
 
-#define array_size(T, N)  (sizeof((T)[0]) * (N))
+#define array_size(T, N)    (sizeof((T)[0]) * (N))
 
 #ifdef BIGINT_DEBUG
 

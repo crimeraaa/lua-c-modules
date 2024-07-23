@@ -13,6 +13,14 @@ all: debug
 debug: CC_FLAGS += -Od -DBIGINT_DEBUG
 debug: build
 	
+# /O1		maximum optimizations (favor space)
+# /O2		maximum optimizations (favor speed)
+# /Os		favor code space
+# /Ot 		favor code speed
+.PHONY: release
+release: CC_FLAGS += -O1
+release: build
+	
 .PHONY: build
 build: bin/big_int.exe
 
